@@ -88,9 +88,17 @@ def _get(url):
             r = _session.get(url, timeout=HTTP_TIMEOUT)
             r.raise_for_status()
             return r.json()
+        except requests.HTTPError as e:
+            # 4xx (auth/not-found/bad-request) won't fix themselves; fail fast
+            # instead of burning the retry budget and stalling the refresh loop
+            if e.response is not None and 400 <= e.response.status_code < 500:
+                raise
+            last = e
+            log.warning("GET failed (%d/%d): %s", attempt, HTTP_RETRIES, e)
         except Exception as e:  # noqa: BLE001
             last = e
             log.warning("GET failed (%d/%d): %s", attempt, HTTP_RETRIES, e)
+        if attempt < HTTP_RETRIES:  # no point sleeping after the last try
             time.sleep(min(2 ** attempt, 15))
     raise RuntimeError(f"GET {url} failed after {HTTP_RETRIES} tries: {last}")
 
@@ -121,14 +129,19 @@ def refresh_api():
         k = c.get("geovisio:length_km") or 0.0
         pics += pc
         km += k
+        # attribute to the "producer" provider; STAC may also list licensor/host
         provs = c.get("providers") or []
-        owner = provs[0] if provs else {}
-        uid = owner.get("id", "unknown")
-        name = owner.get("name", "unknown")
-        row = per_user.setdefault(uid, [name, 0, 0, 0.0])
-        row[1] += 1
-        row[2] += pc
-        row[3] += k
+        owner = next((p for p in provs if "producer" in (p.get("roles") or [])), None)
+        if owner is None and provs:
+            owner = provs[0]
+        uid = owner.get("id") if owner else None
+        # skip provider-less collections so they don't inflate the contributor
+        # count / emit an "unknown" series; totals above still include them
+        if uid:
+            row = per_user.setdefault(uid, [owner.get("name", "unknown"), 0, 0, 0.0])
+            row[1] += 1
+            row[2] += pc
+            row[3] += k
 
     g_seqs.set(seqs)
     g_pics.set(pics)
