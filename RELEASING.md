@@ -34,7 +34,7 @@ not a supported release.
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
     cosign verify-blob checksums.txt \
-      --signature checksums.txt.sig --certificate checksums.txt.pem \
+      --bundle checksums.txt.bundle \
       --certificate-identity-regexp 'https://github.com/osm-fulda/panoramax-exporter/.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 

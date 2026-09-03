@@ -74,8 +74,9 @@ jobs:
           # redirect target can never end up in its own checksum list.
           find . -type f | sort | xargs sha256sum > "$RUNNER_TEMP/checksums.txt"
           mv "$RUNNER_TEMP/checksums.txt" checksums.txt
-          cosign sign-blob --yes --output-signature checksums.txt.sig \
-            --output-certificate checksums.txt.pem checksums.txt
+          # cosign v3 signs blobs into a single Sigstore bundle; the older
+          # --output-signature/--output-certificate pair is gone.
+          cosign sign-blob --yes --bundle checksums.txt.bundle checksums.txt
       - name: Attest build provenance (artifacts)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
