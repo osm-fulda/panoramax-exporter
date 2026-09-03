@@ -58,6 +58,9 @@ jobs:
         env:
           REPO: ${{ github.repository }}
           DIGEST: ${{ steps.push.outputs.digest }}
+      # Image-only project: nothing else fills dist/, but the SBOM action needs
+      # the directory to exist before it can write into it.
+      - run: mkdir -p dist
       # SBOM must exist BEFORE checksums are computed, or it ships unverifiable.
       - name: SBOM
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
