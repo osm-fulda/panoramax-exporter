@@ -23,7 +23,7 @@ import time
 import requests
 from prometheus_client import Gauge, start_http_server
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # --- config (env) -----------------------------------------------------------
 API = os.environ.get("PANORAMAX_API", "http://localhost:5000/api").rstrip("/")
@@ -79,6 +79,14 @@ reports_up = Gauge("panoramax_reports_up", "1 if last reports query succeeded, e
 g_reports = Gauge("panoramax_reports_total", "Reports grouped by status and issue type", ["status", "issue"])
 g_reports_status = Gauge("panoramax_reports_by_status_total", "Reports grouped by status", ["status"])
 g_reports_open = Gauge("panoramax_reports_open_total", "Reports in an unresolved state (open/open_autofix/waiting)")
+
+# An unlabelled Gauge is exported from the start and defaults to 0, which would
+# be indistinguishable from a genuinely empty instance -- and for the queue-age
+# gauge it would read as "no backlog" when nothing has been scraped at all.
+# Start them at NaN so they only carry a number once a scrape has succeeded.
+for _g in (g_accounts, g_pics_all, g_seqs_all, g_pic_fresh, g_jobq_oldest, g_reports_open):
+    _g.set(math.nan)
+
 
 _session = requests.Session()
 if TOKEN:

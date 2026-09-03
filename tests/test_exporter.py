@@ -6,6 +6,9 @@ stub out the HTTP layer (`exporter._get`) rather than hitting a real instance.
 """
 
 import math
+import subprocess
+import sys
+import textwrap
 import tomllib
 from pathlib import Path
 
@@ -179,6 +182,30 @@ _STATS = {
 def _enable_admin(monkeypatch):
     monkeypatch.setattr(exporter, "ADMIN", "auto")
     monkeypatch.setattr(exporter, "TOKEN", "secret")
+
+
+def test_unlabelled_admin_gauges_start_unknown():
+    """Never-scraped admin gauges must not read 0 -- that is a real value.
+
+    Without a token, `panoramax_job_queue_oldest_seconds 0` would read as "no
+    backlog" rather than "never looked". Checked in a subprocess because the
+    assertion is about the module's startup state, which the other tests in
+    this file have long since overwritten.
+    """
+    probe = textwrap.dedent("""
+        import math, exporter
+        unknown = (exporter.g_accounts, exporter.g_pics_all, exporter.g_seqs_all,
+                   exporter.g_pic_fresh, exporter.g_jobq_oldest, exporter.g_reports_open)
+        assert all(math.isnan(g._value.get()) for g in unknown), "expected NaN before first scrape"
+        # the _up gauges are different: 0 there means "not working", which is true
+        assert exporter.admin_up._value.get() == 0
+        assert exporter.reports_up._value.get() == 0
+        print("ok")
+    """)
+    root = Path(__file__).parent.parent
+    result = subprocess.run([sys.executable, "-c", probe], cwd=root, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert "ok" in result.stdout
 
 
 def test_admin_stats_disabled_without_token(monkeypatch):

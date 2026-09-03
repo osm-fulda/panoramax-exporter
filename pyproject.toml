@@ -1,6 +1,6 @@
 [project]
 name = "panoramax-exporter"
-version = "0.2.0"
+version = "0.2.1"
 description = "Prometheus exporter for a Panoramax (GeoVisio) instance"
 readme = "README.md"
 license = { text = "MIT" }

@@ -111,10 +111,13 @@ involved any more.
 `panoramax_pictures_all_total` counts everything the instance holds. The two are
 meant to differ — the gap is your non-public data. Same for sequences.
 
-`panoramax_last_picture_inserted_seconds` and `panoramax_job_queue_oldest_seconds`
-are `NaN` when the instance has no picture at all, respectively no job currently
-due. A gauge without labels always has exactly one sample, so `NaN` is how "no
-value" is expressed rather than withdrawing the series.
+A gauge without labels always has exactly one sample and cannot be withdrawn, so
+`NaN` is how "no value" is expressed. You will see it when the instance has no
+picture at all (`panoramax_last_picture_inserted_seconds`), no job currently due
+(`panoramax_job_queue_oldest_seconds`), and on every unlabelled admin gauge
+before the first successful admin scrape — without a token they stay `NaN`
+rather than claiming 0. Gate dashboards and alerts on
+`panoramax_admin_stats_up == 1`.
 
 `status` values for reports: `open`, `open_autofix`, `waiting`, `closed_solved`,
 `closed_ignored`. `issue` values: `blur_missing`, `blur_excess`, `inappropriate`,
@@ -148,6 +151,9 @@ variables and `NEW_ACCOUNT_WINDOWS` are gone, `REPORTS` is now `ADMIN_STATS`,
 and `panoramax_db_up` became `panoramax_admin_stats_up`. Requires Panoramax
 ≥ 2.15.1. Adds `panoramax_pictures_all_total`, `panoramax_sequences_all_total`
 and `panoramax_sequences_by_status`.
+
+**0.2.1** — Unlabelled admin gauges start at `NaN` instead of 0, so a missing
+token is no longer indistinguishable from an empty instance.
 
 **0.1.0** — First release.
 
