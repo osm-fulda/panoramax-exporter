@@ -1,0 +1,95 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: read
+# Serialize releases, but NEVER cancel one: a half-cancelled release can leave
+# a pushed image with no signature, or a draft with partial assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  gates:
+    uses: ./.github/workflows/quality-gates.yml
+  release:
+    needs: gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write      # create release + upload assets
+      packages: write      # push to GHCR
+      id-token: write      # cosign keyless + provenance
+      attestations: write  # SLSA build provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # latest=auto moves `latest` only for non-prerelease semver tags,
+          # so v2.0.0-rc1 publishes 2.0.0-rc1 without touching latest.
+          flavor: latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build & push image
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Sign image
+        run: cosign sign --yes "ghcr.io/${REPO}@${DIGEST}"
+        env:
+          REPO: ${{ github.repository }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+      # SBOM must exist BEFORE checksums are computed, or it ships unverifiable.
+      - name: SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
+        with:
+          path: .
+          output-file: dist/sbom.spdx.json
+      - name: Checksums + sign artifacts
+        run: |
+          cd dist
+          # Written outside the tree being hashed, then moved in, so the
+          # redirect target can never end up in its own checksum list.
+          find . -type f | sort | xargs sha256sum > "$RUNNER_TEMP/checksums.txt"
+          mv "$RUNNER_TEMP/checksums.txt" checksums.txt
+          cosign sign-blob --yes --output-signature checksums.txt.sig \
+            --output-certificate checksums.txt.pem checksums.txt
+      - name: Attest build provenance (artifacts)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Attest build provenance (image)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Create draft release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Prerelease tags (v1.2.3-rc1) are marked as such.
+          case "$GITHUB_REF_NAME" in *-*) PRE=--prerelease ;; *) PRE= ;; esac
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes "Release notes pending." $PRE
+          find dist -type f -exec gh release upload "$GITHUB_REF_NAME" --clobber {} +

@@ -1,22 +1,82 @@
 # panoramax-exporter
 
-Prometheus exporter for a Panoramax (GeoVisio) instance.
+Prometheus exporter for a [Panoramax](https://panoramax.fr/) (GeoVisio) instance.
 
-Two data sources:
+[![CI](https://github.com/osm-fulda/panoramax-exporter/actions/workflows/ci.yml/badge.svg)](https://github.com/osm-fulda/panoramax-exporter/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/osm-fulda/panoramax-exporter)](https://github.com/osm-fulda/panoramax-exporter/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-- **Public STAC API** (`/api/collections`) — no credentials. Sequences,
-  pictures, total length, per-user breakdown, contributor count.
+Panoramax instances expose plenty of data but no metrics endpoint. This exporter
+turns three sources into Prometheus gauges so you can graph growth, alert on a
+stuck processing pipeline, and see moderation backlog:
+
+- **Public STAC API** (`/api/collections`) — no credentials. Sequences, pictures,
+  total length, per-user breakdown, contributor count.
 - **Reports API** (`/api/reports`) — needs an admin/reviewer bearer token.
-  Counts of picture/sequence reports by status and issue type.
-- **Postgres `accounts` table** (optional) — true registered-account count and
-  recent-signup counts. The public API cannot give this.
+  Report counts by status and issue type.
+- **Postgres** (optional) — registered accounts, job-queue depth and age,
+  pictures by status, growth windows. Things the public API cannot tell you.
 
 A background thread refreshes every `REFRESH_INTERVAL` seconds; Prometheus
-scrapes cached gauges cheaply.
+scrapes cached gauges, so a scrape never triggers I/O against your instance.
+
+## Quick start
+
+Docker, against any public instance — no credentials needed:
+
+```bash
+docker run --rm -p 9155:9155 \
+  -e PANORAMAX_API=https://panoramax.openstreetmap.fr/api \
+  ghcr.io/osm-fulda/panoramax-exporter:latest
+
+curl -s localhost:9155/metrics | grep panoramax_
+```
+
+From a checkout:
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+make deps
+PANORAMAX_API=https://panoramax.openstreetmap.fr/api make run
+```
+
+`docker compose up --build` does the same via `docker-compose.yml`, where you can
+uncomment `PANORAMAX_TOKEN` and `DB_URL` to enable the other two sources.
+
+Scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: panoramax
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['panoramax-exporter:9155']
+```
+
+## Configuration
+
+All configuration is environment variables.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `PANORAMAX_API` | `http://localhost:5000/api` | Base API URL of the instance |
+| `LISTEN_PORT` | `9155` | |
+| `REFRESH_INTERVAL` | `300` | Seconds between refreshes |
+| `PER_USER` | `true` | Emit per-user label series |
+| `PANORAMAX_TOKEN` | – | Admin/reviewer bearer token; enables reports |
+| `REPORTS` | `auto` | `auto` = on when a token is set; or `true`/`false` |
+| `DB_URL` | – | libpq DSN; enables the database metrics |
+| `PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` / `PGDATABASE` | – | Used when `DB_URL` is unset |
+| `NEW_ACCOUNT_WINDOWS` | `1,7,30` | Day windows for the "new" counters |
+| `PAGE_LIMIT` | `1000` | API page size |
+| `HTTP_TIMEOUT` / `HTTP_RETRIES` | `60` / `5` | Per-request timeout, retry count |
+| `LOG_LEVEL` | `INFO` | |
+
+Give the database user **read-only** access. It only ever runs `SELECT`.
 
 ## Metrics
 
-| metric | labels | source |
+| Metric | Labels | Source |
 |---|---|---|
 | `panoramax_up` | | api |
 | `panoramax_scrape_duration_seconds` / `_timestamp_seconds` | | api |
@@ -27,100 +87,65 @@ scrapes cached gauges cheaply.
 | `panoramax_user_sequences_total` | `user`, `user_id` | api |
 | `panoramax_user_pictures_total` | `user`, `user_id` | api |
 | `panoramax_user_length_km_total` | `user`, `user_id` | api |
-| `panoramax_reports_up` | | reports (token) |
-| `panoramax_reports_total` | `status`, `issue` | reports (token) |
-| `panoramax_reports_by_status_total` | `status` | reports (token) |
-| `panoramax_reports_open_total` | | reports (token) |
+| `panoramax_reports_up` | | reports |
+| `panoramax_reports_total` | `status`, `issue` | reports |
+| `panoramax_reports_by_status_total` | `status` | reports |
+| `panoramax_reports_open_total` | | reports |
 | `panoramax_db_up` | | db |
 | `panoramax_accounts_total` | | db |
-| `panoramax_accounts_new_total` | `window` (1d/7d/30d) | db |
+| `panoramax_accounts_new_total` | `window` | db |
 | `panoramax_job_queue_depth` | `task` | db |
 | `panoramax_job_queue_oldest_seconds` | | db |
 | `panoramax_pictures_by_status` | `status` | db |
 | `panoramax_sequences_by_visibility` | `visibility` | db |
-| `panoramax_pictures_new_total` | `window` (1d/7d/30d) | db |
+| `panoramax_pictures_new_total` | `window` | db |
 | `panoramax_last_picture_inserted_seconds` | | db |
 
-`report status`: open, open_autofix, waiting, closed_solved, closed_ignored.
-`report issue`: blur_missing, blur_excess, inappropriate, privacy,
-picture_low_quality, mislocated, copyright, other.
+`status` values for reports: `open`, `open_autofix`, `waiting`, `closed_solved`,
+`closed_ignored`. `issue` values: `blur_missing`, `blur_excess`, `inappropriate`,
+`privacy`, `picture_low_quality`, `mislocated`, `copyright`, `other`.
 
-Report/account metrics only appear once their source is enabled. Report gauges
-also stay empty until at least one report exists.
+Metrics from a disabled source are simply absent. Report gauges stay empty until
+the instance has at least one report.
 
-Useful alert signals (all DB):
-- `panoramax_job_queue_oldest_seconds` high → workers stuck/behind.
+### Useful alerts
+
+- `panoramax_job_queue_oldest_seconds` high → workers stuck or falling behind.
 - `panoramax_job_queue_depth{task="prepare"}` climbing → ingest backlog.
 - `panoramax_pictures_by_status{status="broken"}` rising → processing failures.
-- `time() - panoramax_last_picture_inserted_seconds` — actually
-  `panoramax_last_picture_inserted_seconds` large → no new uploads (instance quiet/dead).
-- `panoramax_sequences_by_visibility` — public vs hidden split (the global
-  `/api/collections` stats only count public data).
+- `panoramax_last_picture_inserted_seconds` large → nothing being uploaded.
+- `panoramax_db_up == 0` / `panoramax_reports_up == 0` → credentials or
+  connectivity broke, and those metrics are now stale.
 
-## Config (env)
+## Limits
 
-| var | default | notes |
-|---|---|---|
-| `PANORAMAX_API` | `https://panorama.osm-fulda.de/api` | |
-| `LISTEN_PORT` | `9155` | |
-| `REFRESH_INTERVAL` | `300` | seconds |
-| `PER_USER` | `true` | per-user label series |
-| `PANORAMAX_TOKEN` | – | admin bearer; enables reports + hidden seqs |
-| `REPORTS` | `auto` | `auto` = on when token set; or `true`/`false` |
-| `DB_URL` | – | libpq DSN; enables account metrics |
-| `PGHOST`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`/`PGPORT` | – | alt to `DB_URL` (used if `DB_URL` unset) |
-| `NEW_ACCOUNT_WINDOWS` | `1,7,30` | day windows for new-accounts metric |
+- API numbers cover **public** sequences only. A token does not change what
+  `/api/collections` lists; use the database source for fully accurate counts.
+- Each DB metric group is guarded independently — on a Panoramax version whose
+  schema lacks a table or column, that group is skipped with a warning instead
+  of failing the whole refresh. The `accounts` age windows need a `created_at`
+  column; without it the total still works.
+- The `/metrics` endpoint is unauthenticated. Keep it internal.
 
-The account-age windows need a `created_at` column on `accounts`; if absent
-those series are skipped (total count still works).
+## Deployment
 
-## Run locally (Docker)
+Kubernetes manifests for the OSM Fulda cluster live in
+[osm-fulda/gitops](https://codeberg.org/osm-fulda/gitops) under
+`apps/panoramax-exporter/` and can serve as a starting point: a Deployment with
+a read-only database user, a Service carrying `prometheus.io/*` scrape
+annotations, and a ServiceMonitor for prometheus-operator setups.
 
-```bash
-docker compose up --build          # API-only, no creds
-curl -s localhost:9155/metrics | grep panoramax_
-```
+Images are published to `ghcr.io/osm-fulda/panoramax-exporter` for `linux/amd64`
+and `linux/arm64`, signed with cosign keyless and shipped with SLSA provenance —
+see [RELEASING.md](RELEASING.md) for the verification commands. Pin a version
+tag; `latest` moves.
 
-Add reports + accounts by uncommenting `PANORAMAX_TOKEN` / `DB_URL` in
-`docker-compose.yml`.
+## Contributing
 
-## GitOps (Codeberg → Flux, cluster k8s01)
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and PRs welcome — especially
+reports from Panoramax versions whose schema differs from the one this was
+written against.
 
-The `k8s/` dir holds kustomize manifests matching the repo layout
-(`namespace: panoramax`, Zalando Postgres secret, annotation-based scrape).
+## License
 
-1. **Build + push image** to the Codeberg container registry, pin a tag:
-   ```bash
-   docker build -t codeberg.org/osm-fulda/panoramax-exporter:0.1.0 .
-   docker push codeberg.org/osm-fulda/panoramax-exporter:0.1.0
-   ```
-   Update the `image:` in `k8s/deployment.yaml`.
-
-2. **Copy `k8s/` into the gitops repo** — e.g. `apps/panoramax-exporter/`, then
-   register it in `clusters/k8s01/apps.yaml` (Flux Kustomization), or add the
-   files to `apps/panoramax/` and list them in that `kustomization.yaml`.
-
-3. **Verify the in-cluster API service name.** `deployment.yaml` points
-   `PANORAMAX_API` at `http://panoramax.panoramax.svc.cluster.local/api` —
-   confirm against the chart's Service (`kubectl -n panoramax get svc`) or just
-   use the public URL `https://panorama.osm-fulda.de/api`.
-
-4. **Reports token** (optional):
-   ```bash
-   kubectl -n panoramax create secret generic panoramax-exporter \
-     --from-literal=token=<ADMIN_BEARER>
-   ```
-   DB creds are already wired from the Zalando secret
-   `panoramax.panoramax-postgres.credentials.postgresql.acid.zalan.do`.
-
-5. **Scrape.** No prometheus-operator is present in the repo, so the Service
-   carries `prometheus.io/*` annotations. If you later add prometheus-operator,
-   enable `k8s/servicemonitor.yaml` in the kustomization.
-
-## Notes / limits
-
-- API stats are **public sequences only**. A token including hidden/private
-  seqs still won't change the global `/api/collections` list; use the DB for
-  fully accurate picture/sequence counts if needed.
-- The reports endpoint defaults to open/waiting only — the exporter passes a
-  CQL2 filter covering all five statuses to count closed ones too.
+MIT — see [LICENSE](LICENSE).

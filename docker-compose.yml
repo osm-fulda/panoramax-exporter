@@ -1,0 +1,16 @@
+services:
+  exporter:
+    build: .
+    image: ghcr.io/osm-fulda/panoramax-exporter:dev
+    ports:
+      - "9155:9155"
+    environment:
+      # Point this at the instance you want to scrape.
+      PANORAMAX_API: "https://panoramax.openstreetmap.fr/api"
+      REFRESH_INTERVAL: "300"
+      PER_USER: "true"
+      REPORTS: "auto"
+      # Admin/reviewer bearer token — enables the report metrics.
+      # PANORAMAX_TOKEN: "..."
+      # libpq DSN — enables the account/pipeline/content metrics.
+      # DB_URL: "postgresql://exporter:secret@db:5432/panoramax"

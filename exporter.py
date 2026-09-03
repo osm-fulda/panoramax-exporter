@@ -20,10 +20,12 @@ import time
 import requests
 from prometheus_client import Gauge, start_http_server
 
+__version__ = "0.1.0"
+
 # --- config (env) -----------------------------------------------------------
-API = os.environ.get("PANORAMAX_API", "https://panorama.osm-fulda.de/api").rstrip("/")
-TOKEN = os.environ.get("PANORAMAX_TOKEN", "").strip()          # optional bearer
-DB_URL = os.environ.get("DB_URL", "").strip()                  # optional libpq DSN
+API = os.environ.get("PANORAMAX_API", "http://localhost:5000/api").rstrip("/")
+TOKEN = os.environ.get("PANORAMAX_TOKEN", "").strip()  # optional bearer
+DB_URL = os.environ.get("DB_URL", "").strip()  # optional libpq DSN
 PORT = int(os.environ.get("LISTEN_PORT", "9155"))
 REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "300"))  # seconds
 PER_USER = os.environ.get("PER_USER", "true").lower() in ("1", "true", "yes")
@@ -99,7 +101,7 @@ def _get(url):
             last = e
             log.warning("GET failed (%d/%d): %s", attempt, HTTP_RETRIES, e)
         if attempt < HTTP_RETRIES:  # no point sleeping after the last try
-            time.sleep(min(2 ** attempt, 15))
+            time.sleep(min(2**attempt, 15))
     raise RuntimeError(f"GET {url} failed after {HTTP_RETRIES} tries: {last}")
 
 
@@ -108,8 +110,7 @@ def _iter_collections():
     url = f"{API}/collections?limit={PAGE_LIMIT}"
     while url:
         data = _get(url)
-        for c in data.get("collections", []):
-            yield c
+        yield from data.get("collections", [])
         url = ""
         for link in data.get("links", []) or []:
             if link.get("rel") == "next":
@@ -172,8 +173,7 @@ def _iter_reports():
     url = f"{API}/reports?limit={PAGE_LIMIT}&filter={quote(cql)}"
     while url:
         data = _get(url)
-        for rep in data.get("reports", []):
-            yield rep
+        yield from data.get("reports", [])
         url = ""
         for link in data.get("links", []) or []:
             if link.get("rel") == "next":
@@ -190,7 +190,7 @@ def refresh_reports():
         reports_up.set(0)
         return
     try:
-        counts = {}       # (status, issue) -> n
+        counts = {}  # (status, issue) -> n
         by_status = {s: 0 for s in ALL_REPORT_STATUSES}
         for rep in _iter_reports():
             status = rep.get("status") or "unknown"
@@ -227,70 +227,71 @@ def refresh_db():
     try:
         # DB_URL wins; otherwise psycopg2 reads PGHOST/PGUSER/PGPASSWORD/PGDATABASE
         conn_args = {"dsn": DB_URL} if DB_URL else {}
-        with psycopg2.connect(connect_timeout=10, **conn_args) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT count(*) FROM accounts")
-                g_accounts.set(cur.fetchone()[0])
-                # new-account windows; guarded so a missing created_at just skips
-                for w in NEW_WINDOWS:
-                    try:
-                        cur.execute(
-                            "SELECT count(*) FROM accounts "
-                            "WHERE created_at > now() - (%s || ' days')::interval",
-                            (w,),
-                        )
-                        g_new.labels(f"{w}d").set(cur.fetchone()[0])
-                    except Exception as e:  # noqa: BLE001
-                        conn.rollback()
-                        log.warning("new-account window %sd skipped: %s", w, e)
-
-                # each block is independently guarded: a missing table/column
-                # skips just that metric instead of failing the whole refresh
-                def _block(name, fn):
-                    try:
-                        fn()
-                    except Exception as e:  # noqa: BLE001
-                        conn.rollback()
-                        log.warning("db block %s skipped: %s", name, e)
-
-                def _job_queue():
-                    g_jobq.clear()
-                    cur.execute("SELECT task, count(*) FROM job_queue GROUP BY task")
-                    for task, n in cur.fetchall():
-                        g_jobq.labels(str(task)).set(n)
-                    # oldest job that is due now (to_do_after_ts null or in the past)
+        with psycopg2.connect(connect_timeout=10, **conn_args) as conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM accounts")
+            g_accounts.set(cur.fetchone()[0])
+            # new-account windows; guarded so a missing created_at just skips
+            for w in NEW_WINDOWS:
+                try:
                     cur.execute(
-                        "SELECT COALESCE(EXTRACT(EPOCH FROM now() - min(ts)), 0) "
-                        "FROM job_queue WHERE to_do_after_ts IS NULL OR to_do_after_ts <= now()"
+                        "SELECT count(*) FROM accounts WHERE created_at > now() - (%s || ' days')::interval",
+                        (w,),
                     )
-                    g_jobq_oldest.set(cur.fetchone()[0])
-                _block("job_queue", _job_queue)
+                    g_new.labels(f"{w}d").set(cur.fetchone()[0])
+                except Exception as e:  # noqa: BLE001
+                    conn.rollback()
+                    log.warning("new-account window %sd skipped: %s", w, e)
 
-                def _pic_status():
-                    g_pic_status.clear()
-                    cur.execute("SELECT status, count(*) FROM pictures GROUP BY status")
-                    for status, n in cur.fetchall():
-                        g_pic_status.labels(str(status)).set(n)
-                _block("pictures_by_status", _pic_status)
+            # each block is independently guarded: a missing table/column
+            # skips just that metric instead of failing the whole refresh
+            def _block(name, fn):
+                try:
+                    fn()
+                except Exception as e:  # noqa: BLE001
+                    conn.rollback()
+                    log.warning("db block %s skipped: %s", name, e)
 
-                def _seq_vis():
-                    g_seq_vis.clear()
-                    cur.execute("SELECT COALESCE(visibility::text, 'unknown'), count(*) FROM sequences GROUP BY 1")
-                    for vis, n in cur.fetchall():
-                        g_seq_vis.labels(str(vis)).set(n)
-                _block("sequences_by_visibility", _seq_vis)
+            def _job_queue():
+                g_jobq.clear()
+                cur.execute("SELECT task, count(*) FROM job_queue GROUP BY task")
+                for task, n in cur.fetchall():
+                    g_jobq.labels(str(task)).set(n)
+                # oldest job that is due now (to_do_after_ts null or in the past)
+                cur.execute(
+                    "SELECT COALESCE(EXTRACT(EPOCH FROM now() - min(ts)), 0) "
+                    "FROM job_queue WHERE to_do_after_ts IS NULL OR to_do_after_ts <= now()"
+                )
+                g_jobq_oldest.set(cur.fetchone()[0])
 
-                def _pic_growth():
-                    for w in NEW_WINDOWS:
-                        cur.execute(
-                            "SELECT count(*) FROM pictures "
-                            "WHERE inserted_at > now() - (%s || ' days')::interval",
-                            (w,),
-                        )
-                        g_pic_new.labels(f"{w}d").set(cur.fetchone()[0])
-                    cur.execute("SELECT COALESCE(EXTRACT(EPOCH FROM now() - max(inserted_at)), -1) FROM pictures")
-                    g_pic_fresh.set(cur.fetchone()[0])
-                _block("pictures_growth", _pic_growth)
+            _block("job_queue", _job_queue)
+
+            def _pic_status():
+                g_pic_status.clear()
+                cur.execute("SELECT status, count(*) FROM pictures GROUP BY status")
+                for status, n in cur.fetchall():
+                    g_pic_status.labels(str(status)).set(n)
+
+            _block("pictures_by_status", _pic_status)
+
+            def _seq_vis():
+                g_seq_vis.clear()
+                cur.execute("SELECT COALESCE(visibility::text, 'unknown'), count(*) FROM sequences GROUP BY 1")
+                for vis, n in cur.fetchall():
+                    g_seq_vis.labels(str(vis)).set(n)
+
+            _block("sequences_by_visibility", _seq_vis)
+
+            def _pic_growth():
+                for w in NEW_WINDOWS:
+                    cur.execute(
+                        "SELECT count(*) FROM pictures WHERE inserted_at > now() - (%s || ' days')::interval",
+                        (w,),
+                    )
+                    g_pic_new.labels(f"{w}d").set(cur.fetchone()[0])
+                cur.execute("SELECT COALESCE(EXTRACT(EPOCH FROM now() - max(inserted_at)), -1) FROM pictures")
+                g_pic_fresh.set(cur.fetchone()[0])
+
+            _block("pictures_growth", _pic_growth)
 
         db_up.set(1)
         log.info("db ok: accounts + pipeline/content/growth metrics set")
@@ -313,10 +314,15 @@ def loop():
 
 
 def main():
-    log.info("starting panoramax exporter: api=%s db=%s reports=%s port=%d interval=%ds",
-             API, "on" if _db_enabled() else "off",
-             "on" if (REPORTS in ("1", "true", "yes", "on") or (REPORTS == "auto" and TOKEN)) else "off",
-             PORT, REFRESH_INTERVAL)
+    log.info(
+        "starting panoramax exporter %s: api=%s db=%s reports=%s port=%d interval=%ds",
+        __version__,
+        API,
+        "on" if _db_enabled() else "off",
+        "on" if (REPORTS in ("1", "true", "yes", "on") or (REPORTS == "auto" and TOKEN)) else "off",
+        PORT,
+        REFRESH_INTERVAL,
+    )
     start_http_server(PORT)
     t = threading.Thread(target=loop, daemon=True)
     t.start()

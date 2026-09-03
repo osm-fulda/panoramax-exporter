@@ -1,0 +1,36 @@
+name: Bug report
+description: Something the exporter does wrong
+labels: [bug, triage]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the metric(s) involved and what value you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Config (env vars, with secrets redacted) and the steps taken.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Exporter version
+      placeholder: "0.1.0 (or image digest)"
+    validations:
+      required: true
+  - type: input
+    id: panoramax
+    attributes:
+      label: Panoramax API version
+      description: From /api or the deployed image tag.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Exporter log output around the failure.
+      render: shell

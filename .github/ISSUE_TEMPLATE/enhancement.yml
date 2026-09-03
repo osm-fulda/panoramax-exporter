@@ -1,0 +1,26 @@
+name: Enhancement
+description: A new metric, or a change to existing behavior
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you see or alert on today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: |
+        For a new metric: name, type, labels, and the source (API, reports, DB).
+        Remember that metric names are a public API.
+    validations:
+      required: true
+  - type: checkboxes
+    id: breaking
+    attributes:
+      label: Compatibility
+      options:
+        - label: This renames or removes an existing metric (breaking change)

@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+
+# AI tools
+_bmad-output/
+_bmad/
+openspec/
+.claude/settings.local.json
