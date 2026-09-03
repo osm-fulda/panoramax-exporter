@@ -5,6 +5,7 @@ its gauges on the default prometheus registry, so tests import it once and
 stub out the HTTP layer (`exporter._get`) rather than hitting a real instance.
 """
 
+import math
 import tomllib
 from pathlib import Path
 
@@ -156,60 +157,157 @@ def test_refresh_api_clears_stale_user_series(monkeypatch):
     assert samples == {"stay"}
 
 
-# --- reports -----------------------------------------------------------------
+# --- admin stats -------------------------------------------------------------
+
+_STATS = {
+    "accounts": {"total": 42, "new": {"1d": 1, "7d": 3, "30d": 9}},
+    "pictures": {
+        "total": 1000,
+        "by_status": {"ready": 900, "broken": 10, "preparing": 90},
+        "new": {"1d": 5, "7d": 20, "30d": 70},
+        "seconds_since_last_insert": 123.5,
+    },
+    "sequences": {
+        "total": 50,
+        "by_status": {"ready": 48, "deleted": 2},
+        "by_visibility": {"public": 40, "hidden": 9, "unset": 1},
+    },
+    "jobs": {"by_task": {"prepare": 4, "delete": 0}, "oldest_due_job_age_seconds": 61.0},
+}
 
 
-def test_refresh_reports_disabled_without_token(monkeypatch):
-    """REPORTS=auto and no token: stay silent rather than hammering a 401."""
-    monkeypatch.setattr(exporter, "REPORTS", "auto")
+def _enable_admin(monkeypatch):
+    monkeypatch.setattr(exporter, "ADMIN", "auto")
+    monkeypatch.setattr(exporter, "TOKEN", "secret")
+
+
+def test_admin_stats_disabled_without_token(monkeypatch):
+    """ADMIN_STATS=auto and no token: stay quiet rather than hammering a 401."""
+    monkeypatch.setattr(exporter, "ADMIN", "auto")
     monkeypatch.setattr(exporter, "TOKEN", "")
     called = []
-    monkeypatch.setattr(exporter, "_iter_reports", lambda: called.append(1) or iter([]))
+    monkeypatch.setattr(exporter, "_get", lambda url: called.append(url))
+    exporter.refresh_admin_stats()
+    assert called == []
+
+
+def test_admin_stats_maps_every_section(monkeypatch):
+    _enable_admin(monkeypatch)
+    seen = []
+
+    def fake_get(url):
+        seen.append(url)
+        return _STATS
+
+    monkeypatch.setattr(exporter, "_get", fake_get)
+    exporter.refresh_admin_stats()
+
+    assert seen == [f"{exporter.API}/admin/stats"]
+    assert exporter.g_accounts._value.get() == 42
+    assert exporter.g_accounts_new.labels("7d")._value.get() == 3
+    assert exporter.g_pics_all._value.get() == 1000
+    assert exporter.g_pic_status.labels("broken")._value.get() == 10
+    assert exporter.g_pic_new.labels("30d")._value.get() == 70
+    assert exporter.g_pic_fresh._value.get() == 123.5
+    assert exporter.g_seqs_all._value.get() == 50
+    assert exporter.g_seq_status.labels("deleted")._value.get() == 2
+    assert exporter.g_seq_vis.labels("unset")._value.get() == 1
+    assert exporter.g_jobq.labels("prepare")._value.get() == 4
+    assert exporter.g_jobq_oldest._value.get() == 61.0
+    assert exporter.admin_up._value.get() == 1
+
+
+def test_admin_stats_reports_nan_on_null(monkeypatch):
+    """null freshness/job age is unknown, not zero and not the previous value."""
+    _enable_admin(monkeypatch)
+    monkeypatch.setattr(exporter, "_get", lambda url: _STATS)
+    exporter.refresh_admin_stats()
+
+    empty = {
+        **_STATS,
+        "pictures": {**_STATS["pictures"], "seconds_since_last_insert": None},
+        "jobs": {**_STATS["jobs"], "oldest_due_job_age_seconds": None},
+    }
+    monkeypatch.setattr(exporter, "_get", lambda url: empty)
+    exporter.refresh_admin_stats()
+
+    assert math.isnan(exporter.g_pic_fresh._value.get())
+    assert math.isnan(exporter.g_jobq_oldest._value.get())
+
+
+def test_admin_stats_clears_vanished_keys(monkeypatch):
+    """A status that disappears upstream must not freeze at its last value."""
+    _enable_admin(monkeypatch)
+    monkeypatch.setattr(exporter, "_get", lambda url: _STATS)
+    exporter.refresh_admin_stats()
+
+    fewer = {**_STATS, "pictures": {**_STATS["pictures"], "by_status": {"ready": 950}}}
+    monkeypatch.setattr(exporter, "_get", lambda url: fewer)
+    exporter.refresh_admin_stats()
+
+    statuses = {s.labels["status"] for s in exporter.g_pic_status.collect()[0].samples}
+    assert statuses == {"ready"}
+
+
+def test_admin_stats_sets_down_on_failure(monkeypatch):
+    _enable_admin(monkeypatch)
+
+    def boom(url):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(exporter, "_get", boom)
+    exporter.refresh_admin_stats()
+    assert exporter.admin_up._value.get() == 0
+
+
+# --- reports -----------------------------------------------------------------
+
+_REPORTS = {
+    "total": 4,
+    "unresolved": 3,
+    "by_status": {"open": 2, "waiting": 1, "closed_solved": 1, "closed_ignored": 0},
+    "by_status_issue": {
+        "open": {"blur_missing": 2},
+        "waiting": {"privacy": 1},
+        "closed_solved": {"privacy": 1},
+    },
+}
+
+
+def test_reports_disabled_without_token(monkeypatch):
+    monkeypatch.setattr(exporter, "ADMIN", "auto")
+    monkeypatch.setattr(exporter, "TOKEN", "")
+    called = []
+    monkeypatch.setattr(exporter, "_get", lambda url: called.append(url))
     exporter.refresh_reports()
     assert called == []
 
 
-def test_refresh_reports_counts_by_status_and_issue(monkeypatch):
-    reports = [
-        {"status": "open", "issue": "blur_missing"},
-        {"status": "open", "issue": "blur_missing"},
-        {"status": "waiting", "issue": "privacy"},
-        {"status": "closed_solved", "issue": "privacy"},
-    ]
-    monkeypatch.setattr(exporter, "REPORTS", "true")
-    monkeypatch.setattr(exporter, "TOKEN", "secret")
-    monkeypatch.setattr(exporter, "_iter_reports", lambda: iter(reports))
+def test_reports_counts_by_status_and_issue(monkeypatch):
+    _enable_admin(monkeypatch)
+    seen = []
+
+    def fake_get(url):
+        seen.append(url)
+        return _REPORTS
+
+    monkeypatch.setattr(exporter, "_get", fake_get)
     exporter.refresh_reports()
 
+    assert seen == [f"{exporter.API}/admin/reports/stats"]
     assert exporter.g_reports.labels("open", "blur_missing")._value.get() == 2
     assert exporter.g_reports_status.labels("waiting")._value.get() == 1
-    assert exporter.g_reports_open._value.get() == 3  # open + waiting
+    # taken from the endpoint, not recomputed locally
+    assert exporter.g_reports_open._value.get() == 3
     assert exporter.reports_up._value.get() == 1
 
 
-def test_refresh_reports_sets_down_on_failure(monkeypatch):
-    def boom():
+def test_reports_sets_down_on_failure(monkeypatch):
+    _enable_admin(monkeypatch)
+
+    def boom(url):
         raise RuntimeError("api down")
 
-    monkeypatch.setattr(exporter, "REPORTS", "true")
-    monkeypatch.setattr(exporter, "TOKEN", "secret")
-    monkeypatch.setattr(exporter, "_iter_reports", boom)
+    monkeypatch.setattr(exporter, "_get", boom)
     exporter.refresh_reports()
-
     assert exporter.reports_up._value.get() == 0
-
-
-# --- db ----------------------------------------------------------------------
-
-
-def test_db_disabled_without_config(monkeypatch):
-    monkeypatch.setattr(exporter, "DB_URL", "")
-    monkeypatch.delenv("PGHOST", raising=False)
-    assert exporter._db_enabled() is False
-    exporter.refresh_db()  # must be a no-op, not an import error
-
-
-def test_db_enabled_via_pghost(monkeypatch):
-    monkeypatch.setattr(exporter, "DB_URL", "")
-    monkeypatch.setenv("PGHOST", "db.internal")
-    assert exporter._db_enabled() is True

@@ -9,8 +9,7 @@ services:
       PANORAMAX_API: "https://panoramax.openstreetmap.fr/api"
       REFRESH_INTERVAL: "300"
       PER_USER: "true"
-      REPORTS: "auto"
-      # Admin/reviewer bearer token — enables the report metrics.
+      ADMIN_STATS: "auto"
+      # Admin/reviewer bearer token — enables the account, pipeline, content
+      # and moderation metrics. Needs Panoramax >= 2.15.1.
       # PANORAMAX_TOKEN: "..."
-      # libpq DSN — enables the account/pipeline/content metrics.
-      # DB_URL: "postgresql://exporter:secret@db:5432/panoramax"
