@@ -19,6 +19,7 @@ import math
 import os
 import threading
 import time
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from prometheus_client import Gauge, start_http_server
@@ -126,6 +127,19 @@ def _set_mapping(gauge, mapping):
         gauge.labels(str(key)).set(value)
 
 
+def _on_api_host(url):
+    """Point a link from the API back at PANORAMAX_API's scheme and host.
+
+    Behind a reverse proxy the API builds its links with the public scheme
+    (https) but the host it was called with. Called on an internal http
+    address, that gives a link to port 443 there, which does not answer.
+    Only the path and query of the link are kept.
+    """
+    base = urlsplit(API)
+    link = urlsplit(url)
+    return urlunsplit((base.scheme, base.netloc, link.path, link.query, ""))
+
+
 def _iter_collections():
     """Yield every collection dict, following STAC `next` links."""
     url = f"{API}/collections?limit={PAGE_LIMIT}"
@@ -134,8 +148,8 @@ def _iter_collections():
         yield from data.get("collections", [])
         url = ""
         for link in data.get("links", []) or []:
-            if link.get("rel") == "next":
-                url = link.get("href", "")
+            if link.get("rel") == "next" and link.get("href"):
+                url = _on_api_host(link["href"])
                 break
 
 

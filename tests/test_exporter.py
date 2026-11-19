@@ -94,14 +94,38 @@ def test_get_raises_after_exhausting_retries(monkeypatch):
 
 
 def test_iter_collections_follows_next_links(monkeypatch):
+    monkeypatch.setattr(exporter, "API", "http://api.test/api")
     pages = {
-        f"{exporter.API}/collections?limit={exporter.PAGE_LIMIT}": _page(
-            [_collection("a", "Alice", 1, 1.0)], "http://api.test/page2"
+        f"http://api.test/api/collections?limit={exporter.PAGE_LIMIT}": _page(
+            [_collection("a", "Alice", 1, 1.0)], "http://api.test/api/collections?page=2"
         ),
-        "http://api.test/page2": _page([_collection("b", "Bob", 2, 2.0)]),
+        "http://api.test/api/collections?page=2": _page([_collection("b", "Bob", 2, 2.0)]),
     }
     monkeypatch.setattr(exporter, "_get", lambda url: pages[url])
     assert len(list(exporter._iter_collections())) == 2
+
+
+def test_iter_collections_keeps_api_scheme_and_host(monkeypatch):
+    """Behind a proxy the API builds `next` links with https:// but the host
+    it was called with. Follow them on PANORAMAX_API instead (port 80 here)."""
+    monkeypatch.setattr(exporter, "API", "http://panoramax-api.svc/api")
+    first = f"http://panoramax-api.svc/api/collections?limit={exporter.PAGE_LIMIT}"
+    nxt = "https://panoramax-api.svc/api/collections?limit=1000&page=created+%3E+'2026-11-14'"
+    pages = {
+        first: _page([_collection("a", "Alice", 1, 1.0)], nxt),
+        "http://panoramax-api.svc/api/collections?limit=1000&page=created+%3E+'2026-11-14'": _page(
+            [_collection("b", "Bob", 2, 2.0)]
+        ),
+    }
+    seen = []
+
+    def fake_get(url):
+        seen.append(url)
+        return pages[url]
+
+    monkeypatch.setattr(exporter, "_get", fake_get)
+    assert len(list(exporter._iter_collections())) == 2
+    assert all(u.startswith("http://panoramax-api.svc/") for u in seen)
 
 
 # --- aggregation -------------------------------------------------------------
