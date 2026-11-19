@@ -24,7 +24,7 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 from prometheus_client import Gauge, start_http_server
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 # --- config (env) -----------------------------------------------------------
 API = os.environ.get("PANORAMAX_API", "http://localhost:5000/api").rstrip("/")
