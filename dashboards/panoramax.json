@@ -141,7 +141,9 @@
             "uid": "${datasource}"
           },
           "expr": "up{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -223,7 +225,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_up{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -305,7 +309,9 @@
             "uid": "${datasource}"
           },
           "expr": "time() - panoramax_scrape_timestamp_seconds{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -374,7 +380,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_scrape_duration_seconds{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -436,7 +444,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_admin_stats_up{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -519,7 +529,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_reports_up{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -615,7 +627,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_sequences_total{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -677,7 +691,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_pictures_total{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -739,7 +755,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_length_km_total{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -801,7 +819,9 @@
             "uid": "${datasource}"
           },
           "expr": "panoramax_contributors_total{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1271,7 +1291,9 @@
             "uid": "${datasource}"
           },
           "expr": "(panoramax_accounts_total{job=\"$job\", instance=\"$instance\"}) and on() (panoramax_admin_stats_up{job=\"$job\", instance=\"$instance\"} == 1)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1334,7 +1356,9 @@
             "uid": "${datasource}"
           },
           "expr": "(panoramax_pictures_all_total{job=\"$job\", instance=\"$instance\"}) and on() (panoramax_admin_stats_up{job=\"$job\", instance=\"$instance\"} == 1)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1397,7 +1421,9 @@
             "uid": "${datasource}"
           },
           "expr": "(panoramax_sequences_all_total{job=\"$job\", instance=\"$instance\"}) and on() (panoramax_admin_stats_up{job=\"$job\", instance=\"$instance\"} == 1)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1460,7 +1486,9 @@
             "uid": "${datasource}"
           },
           "expr": "(panoramax_pictures_all_total{job=\"$job\", instance=\"$instance\"} - on(job, instance) panoramax_pictures_total{job=\"$job\", instance=\"$instance\"}) and on() (panoramax_admin_stats_up{job=\"$job\", instance=\"$instance\"} == 1)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1523,7 +1551,9 @@
             "uid": "${datasource}"
           },
           "expr": "(panoramax_last_picture_inserted_seconds{job=\"$job\", instance=\"$instance\"} >= 0) and on() (panoramax_admin_stats_up{job=\"$job\", instance=\"$instance\"} == 1)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1586,7 +1616,9 @@
             "uid": "${datasource}"
           },
           "expr": "(panoramax_job_queue_oldest_seconds{job=\"$job\", instance=\"$instance\"} >= 0 or on() vector(0)) and on() (panoramax_admin_stats_up{job=\"$job\", instance=\"$instance\"} == 1)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -2034,7 +2066,9 @@
             "uid": "${datasource}"
           },
           "expr": "(panoramax_reports_open_total{job=\"$job\", instance=\"$instance\"}) and on() (panoramax_reports_up{job=\"$job\", instance=\"$instance\"} == 1)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
