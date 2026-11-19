@@ -41,3 +41,7 @@ Two sources, both HTTP; the second is optional:
   into a blanket retry.
 - Metric names are a public API — renaming one is a breaking change (see
   RELEASING.md).
+- `dashboards/panoramax.json` queries every metric; `tests/test_dashboard.py`
+  fails on a metric without a panel or a panel on a vanished metric. Add or
+  rename the panel in the same change, give it a `description`, and keep
+  every selector on `job="$job", instance="$instance"`.

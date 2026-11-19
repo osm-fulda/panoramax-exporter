@@ -134,6 +134,27 @@ Metrics from a disabled source are simply absent.
 - `panoramax_admin_stats_up == 0` / `panoramax_reports_up == 0` → the token or
   connectivity broke, and those metrics are now stale.
 
+## Grafana dashboard
+
+[`dashboards/panoramax.json`](dashboards/panoramax.json) shows every metric
+above: status and data age, the public catalogue (totals, growth, per
+contributor), and, with a token, the instance and moderation panels. Without a
+token those read *needs admin token* instead of `NaN`. Every panel's ⓘ says what
+it shows and what an unusual value means.
+
+Nothing in it is tied to one installation: the data source, `job` and
+`instance` are dashboard variables, so one copy serves several instances.
+
+- **Import:** Grafana → Dashboards → New → Import, upload the file.
+- **Provision from a file:** put it in a directory a
+  [file provider](https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards)
+  reads. It picks the first Prometheus data source; switch with the
+  *Data source* variable.
+
+Built against Grafana 12. `tests/test_dashboard.py` fails when a metric has no
+panel or a panel queries a metric the exporter no longer emits, so add or
+rename the panel together with the metric.
+
 ## Limits
 
 - STAC numbers cover **public** sequences only. A token does not change what
