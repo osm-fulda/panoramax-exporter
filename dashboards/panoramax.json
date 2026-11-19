@@ -1067,7 +1067,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "panoramax_user_pictures_total{job=\"$job\", instance=\"$instance\"}",
+          "expr": "sum by (user, user_id) (panoramax_user_pictures_total{job=\"$job\", instance=\"$instance\"})",
           "legendFormat": "",
           "instant": true,
           "range": false,
@@ -1079,7 +1079,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "panoramax_user_sequences_total{job=\"$job\", instance=\"$instance\"}",
+          "expr": "sum by (user, user_id) (panoramax_user_sequences_total{job=\"$job\", instance=\"$instance\"})",
           "legendFormat": "",
           "instant": true,
           "range": false,
@@ -1091,7 +1091,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "panoramax_user_length_km_total{job=\"$job\", instance=\"$instance\"}",
+          "expr": "sum by (user, user_id) (panoramax_user_length_km_total{job=\"$job\", instance=\"$instance\"})",
           "legendFormat": "",
           "instant": true,
           "range": false,
